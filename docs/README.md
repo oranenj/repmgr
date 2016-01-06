@@ -100,6 +100,95 @@ promotes a (local) standby.
 A witness server only needs to be created if `repmgrd` is in use.
 
 
+
+Metadata
+--------
+
+In order to effectively manage a replication cluster, `repmgr` needs to store
+information about the servers in the cluster in a dedicated database schema.
+This schema is automatically created during the first step in initialising
+a `repmgr`-controlled cluster (`repmgr primary register`) and contains the
+following objects:
+
+tables:
+  - repl_events:
+  - repl_nodes:
+  - repl_monitor:
+
+views:
+  - repl_status:
+  - repl_show_nodes:
+
+
+The `repmgr` metadata schema can be stored in an existing database or in its own
+dedicated database.
+
+
+Installation
+============
+
+System requirements
+-------------------
+
+`repmgr` is developed and tested on Linux and OS X, but should work on any
+UNIX-like system supported by PostgreSQL.
+
+`repmgr` supports PostgreSQL from version 9.3.
+
+All servers in the replication cluster must be running the same major version of
+PostgreSQL, and we recommend that they also run the same minor version.
+
+`repmgr` must be installed on each server in the replication cluster.
+
+A dedicated system user for `repmgr` is *not* required; as many `repmgr` and
+`repmgrd` actions require direct access to the PostgreSQL data directory,
+it is usually executed by the `postgres` user.
+
+Packages
+--------
+
+We recommend installing `repmgr` using the available packages for your
+system.
+
+- RedHat/CentOS: RPM packages for `repmgr` are available via Yum throug
+  the PostgreSQL Global Development Group RPM repository ( http://yum.postgresql.org/ ).
+  You need to follow the instructions for your distribution (RedHat, CentOS,
+  Fedora, etc.) and architecture as detailed at yum.postgresql.org.
+
+- Debian/Ubuntu: the most recent `repmgr` packages are available from the
+  PostgreSQL Community APT repository ( http://apt.postgresql.org/ ).
+  Instructions can be found in the APT section of the PostgreSQL Wiki
+  ( https://wiki.postgresql.org/wiki/Apt ).
+
+See `PACKAGES.md` for details on building .deb and .rpm packages
+from the `repmgr` source code.
+
+
+Source installation
+-------------------
+
+`repmgr` source code can be obtained directly from the project GitHub repository:
+
+    git clone https://github.com/2ndQuadrant/repmgr
+
+Release tarballs are also available:
+
+    https://github.com/2ndQuadrant/repmgr/releases
+    http://repmgr.org/downloads.php
+
+`repmgr` is compiled in the same way as a PostgreSQL extension using the PGXS
+infrastructure, e.g.:
+
+    sudo make USE_PGXS=1 install
+
+
+
+Setting up a replication cluster with repmgr
+============================================
+
+
+
+
 Configuration
 -------------
 
@@ -124,26 +213,3 @@ Certain items in the configuration file can be overridden with command line opti
 
 - `-L/--log-level`
 - `-b/--pg_bindir`
-
-Metadata
---------
-
-In order to effectively manage a replication cluster, `repmgr` needs to store
-information about the servers in the cluster in a dedicated database schema.
-This schema is automatically created during the first step in initialising
-a `repmgr`-controlled cluster (`repmgr primary register`) and contains the
-following objects:
-
-tables:
-  - repl_events:
-  - repl_nodes:
-  - repl_monitor:
-
-views:
-  - repl_status:
-  - repl_show_nodes:
-
-
-The `repmgr` metadata schema can be stored in an existing database or in its own
-dedicated database.
-
