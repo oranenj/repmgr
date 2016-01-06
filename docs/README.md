@@ -99,8 +99,6 @@ promotes a (local) standby.
 
 A witness server only needs to be created if `repmgrd` is in use.
 
-
-
 Metadata
 --------
 
@@ -111,13 +109,13 @@ a `repmgr`-controlled cluster (`repmgr primary register`) and contains the
 following objects:
 
 tables:
-  - repl_events:
-  - repl_nodes:
-  - repl_monitor:
+  - repl_events: events of interest
+  - repl_nodes: connection and status information for each server in the replication cluster
+  - repl_monitor: historical standby monitoring information written by `repmgrd`
 
 views:
-  - repl_status:
-  - repl_show_nodes:
+  - repl_show_nodes: based on the `repl_nodes` showing name of the server's upstream node
+  - repl_status: when `repmgrd`'s monitoring is enabled, shows current monitoring status for each node
 
 
 The `repmgr` metadata schema can be stored in an existing database or in its own
@@ -185,7 +183,6 @@ infrastructure, e.g.:
 
 Setting up a replication cluster with repmgr
 ============================================
-
 
 
 
