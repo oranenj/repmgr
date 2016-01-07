@@ -31,9 +31,10 @@ The `repmgr` suite provides two main tools:
 provides a single read/write primary server and one or more read-only standbys
 containing near-real time copies of the primary server's database.
 
-For a multi-master replication solution, please see 2ndQuadrant's BDR (bi-directional
-replication) extension. For selective replication, e.g. of individual tables
-or databases from one server to another, please see 2ndQuadrant's pglogical extension.
+For a multi-master replication solution, please see 2ndQuadrant's BDR
+(bi-directional replication) extension. For selective replication, e.g.
+of individual tables or databases from one server to another, please
+see 2ndQuadrant's pglogical extension.
 
 
 ### Concepts
@@ -97,7 +98,7 @@ promotes a (local) standby.
 
 A witness server only needs to be created if `repmgrd` is in use.
 
-### Metadata
+### repmgr user and metadata
 
 In order to effectively manage a replication cluster, `repmgr` needs to store
 information about the servers in the cluster in a dedicated database schema.
@@ -120,6 +121,8 @@ views:
 The `repmgr` metadata schema can be stored in an existing database or in its own
 dedicated database.
 
+A dedicated superuser is required to own the meta-database as well as carry out
+administrative actions.
 
 Installation
 ------------
@@ -206,13 +209,14 @@ Certain items in the configuration file can be overridden with command line opti
 - `-b/--pg_bindir`
 
 
-Setting up a replication cluster with repmgr
---------------------------------------------
+Setting up a simple replication cluster with repmgr
+---------------------------------------------------
 
 The following section will describe how to set up a basic replication cluster
-using the `repmgr` command line tool. It is assumed PostgreSQL is installed
-on all servers in the cluster, `rsync` is available and password-less SSH
-connections are possible between all servers.
+with a primary and a standby server using the `repmgr` command line tool.
+It is assumed PostgreSQL is installed on both servers in the cluster,
+`rsync` is available and password-less SSH connections are possible between
+both servers.
 
     TIP: for testing `repmgr`, it's possible to use multiple PostgreSQL
     instances running on different ports on the same computer, with
@@ -220,8 +224,8 @@ connections are possible between all servers.
 
 ### PostgreSQL configuration
 
-The primary server needs to be configured for replication with settings
-like the following in `postgresql.conf`:
+On the primary server, a PostgreSQL instance must be initialised and operational.
+The following replication settings must be included in `postgresql.conf`:
 
     # Allow read-only queries on standby servers. The number of WAL
     # senders should be larger than the number of standby servers.
@@ -243,7 +247,181 @@ like the following in `postgresql.conf`:
     archive_mode = on
     archive_command = 'cd .'
 
-    # If you plan to use repmgrd, ensure that shared_preload_libraries
-    # is configured to load 'repmgr_funcs'
+Create a dedicated PostgreSQL superuser account and a database for
+the `rempgr` metadata, e.g.
 
-    shared_preload_libraries = 'repmgr_funcs'
+    createuser -s repmgr
+    createdb repmgr -O repmgr
+
+For the examples in this document, the name `repmgr` will be used for both
+user and database, but any names can be used.
+
+Ensure the `repmgr` user has appropriate permissions in `pg_hba.conf` and
+can connect in replication mode; `pg_hba.conf` should contain entries
+similar to the following:
+
+    local   replication   repmgr                              trust
+    host    replication   repmgr      127.0.0.1/32            trust
+    host    replication   repmgr      192.168.1.0/32          trust
+
+    local   repmgr        repmgr                              trust
+    host    repmgr        repmgr      127.0.0.1/32            trust
+    host    repmgr        repmgr      192.168.1.0/32          trust
+
+Adjust according to your network environment and authentication requirements.
+
+On the standby, do not create a PostgreSQL instance, but do ensure an empty
+directory is available for the `postgres` system user to create a data
+directory.
+
+
+### repmgr configuration file
+
+Create a `repmgr.conf` file on both servers. The file must contain at
+least the following parameters:
+
+    cluster=test
+    node=1
+    node_name=node1
+    conninfo='host=repmgr_node1 user=repmgr dbname=repmgr'
+
+- `cluster`: an arbitrary name for the replication cluster; this must be identical
+     on all nodes
+- `node`: a unique integer identifying the node
+- `node_name`: a unique string identifying the node; we recommend a name
+     specific to the server (e.g. 'server_1'); avoid names indicating the
+     current replication role like 'primary' or 'standby' as the server's
+     role could change.
+- `conninfo`: a valid connection string for the `repmgr` database on the
+     *current* server. (On the standby, the database will not yet exist, but
+     `repmgr` needs to know the connection details to complete the setup
+     process).
+
+`repmgr.conf` should not be stored inside the PostgreSQL data directory,
+as it could be overwritten when setting up or reinitialising the PostgreSQL
+server. See section `Configuration` above for further details about `repmgr.conf`.
+
+`repmgr` will create a schema named after the cluster and prefixed with `repmgr_`,
+e.g. `repmgr_test`; we also recommend that you set the `repmgr` user's search path
+to include this schema name, e.g.
+
+    ALTER USER repmgr SET search_path TO repmgr_test, "$user", public;
+
+### Initialise the primary server
+
+To enable `repmgr` to support a replication cluster, the primary node must
+be registered with `repmgr`, which creates the `repmgr` database:
+
+    $ repmgr -f repmgr.conf primary register
+    [2016-01-07 16:56:46] [NOTICE] master node correctly registered for cluster test with id 1 (conninfo: host=repmgr_node1 user=repmgr dbname=repmgr)
+
+### Clone the standby server
+
+The next step, cloning the standby from the primary server, is where `repmgr`
+starts to unfold its true potential, by combining a number of otherwise manual
+steps into one command, `repmgr standby clone`.
+
+    $ repmgr -h repmgr_node1 -U repmgr -d repmgr -D /path/to/node2/data/ standby clone
+    [2016-01-07 17:21:26] [NOTICE] destination directory '/path/to/node2/data/' provided
+    [2016-01-07 17:21:26] [NOTICE] starting backup...
+    [2016-01-07 17:21:26] [HINT] this may take some time; consider using the -c/--fast-checkpoint option
+    NOTICE:  pg_stop_backup complete, all required WAL segments have been archived
+    [2016-01-07 17:21:28] [NOTICE] standby clone (using pg_basebackup) complete
+    [2016-01-07 17:21:28] [NOTICE] you can now start your PostgreSQL server
+    [2016-01-07 17:21:28] [HINT] for example : pg_ctl -D /path/to/node2/data/ start
+
+This will clone the PostgreSQL data directory files from the primary, including
+`postgresql.conf` and `pg_hba.conf` files, and additionally automatically create
+the `recovery.conf` file containing the correct parameters to start streaming
+from the primary server. Make any adjustments to the configuration files now, then
+start the standby PostgreSQL server.
+
+### Verify replication is functioning
+
+Connect to the primary server and execute:
+
+    repmgr=# SELECT * FROM pg_stat_replication ;
+    -[ RECORD 1 ]----+------------------------------
+    pid              | 7704
+    usesysid         | 16384
+    usename          | repmgr
+    application_name | walreceiver
+    client_addr      | 192.168.1.2
+    client_hostname  |
+    client_port      | 46196
+    backend_start    | 2016-01-07 17:32:58.322373+09
+    backend_xmin     |
+    state            | streaming
+    sent_location    | 0/3000220
+    write_location   | 0/3000220
+    flush_location   | 0/3000220
+    replay_location  | 0/3000220
+    sync_priority    | 0
+    sync_state       | async
+
+
+Reference
+---------
+
+### Error codes
+
+`repmgr` or `repmgrd` will return one of the following error codes on program
+exit:
+
+* SUCCESS (0)              Program ran successfully.
+* ERR_BAD_CONFIG (1)       Configuration file could not be parsed or was invalid
+* ERR_BAD_RSYNC (2)        An rsync call made by the program returned an error
+* ERR_NO_RESTART (4)       An attempt to restart a PostgreSQL instance failed
+* ERR_DB_CON (6)           Error when trying to connect to a database
+* ERR_DB_QUERY (7)         Error while executing a database query
+* ERR_PROMOTED (8)         Exiting program because the node has been promoted to master
+* ERR_BAD_PASSWORD (9)     Password used to connect to a database was rejected
+* ERR_STR_OVERFLOW (10)    String overflow error
+* ERR_FAILOVER_FAIL (11)   Error encountered during failover (repmgrd only)
+* ERR_BAD_SSH (12)         Error when connecting to remote host via SSH
+* ERR_SYS_FAILURE (13)     Error when forking (repmgrd only)
+* ERR_BAD_BASEBACKUP (14)  Error when executing pg_basebackup
+* ERR_MONITORING_FAIL (16) Unrecoverable error encountered during monitoring (repmgrd only)
+
+Support and Assistance
+----------------------
+
+2ndQuadrant provides 24x7 production support for repmgr, including
+configuration assistance, installation verification and training for
+running a robust replication cluster. For further details see:
+
+* http://2ndquadrant.com/en/support/
+
+There is a mailing list/forum to discuss contributions or issues
+http://groups.google.com/group/repmgr
+
+The IRC channel #repmgr is registered with freenode.
+
+Further information is available at http://www.repmgr.org/
+
+We'd love to hear from you about how you use repmgr. Case studies and
+news are always welcome. Send us an email at info@2ndQuadrant.com, or
+send a postcard to
+
+    repmgr
+    c/o 2ndQuadrant
+    7200 The Quorum
+    Oxford Business Park North
+    Oxford
+    OX4 2JZ
+    United Kingdom
+
+Thanks from the repmgr core team.
+
+* Ian Barwick
+* Jaime Casanova
+* Abhijit Menon-Sen
+* Simon Riggs
+* Cedric Villemain
+
+Further reading
+---------------
+
+* http://blog.2ndquadrant.com/announcing-repmgr-2-0/
+* http://blog.2ndquadrant.com/managing-useful-clusters-repmgr/
+* http://blog.2ndquadrant.com/easier_postgresql_90_clusters/
