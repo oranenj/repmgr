@@ -1,4 +1,3 @@
-==========================================
 repmgr: Replication Manager for PostgreSQL
 ==========================================
 
@@ -10,7 +9,7 @@ switchover operations.
 
 
 Overview
-========
+--------
 
 The `repmgr` suite provides two main tools:
 
@@ -37,8 +36,7 @@ replication) extension. For selective replication, e.g. of individual tables
 or databases from one server to another, please see 2ndQuadrant's pglogical extension.
 
 
-Concepts
---------
+### Concepts
 
 - replication cluster
 
@@ -99,8 +97,7 @@ promotes a (local) standby.
 
 A witness server only needs to be created if `repmgrd` is in use.
 
-Metadata
---------
+### Metadata
 
 In order to effectively manage a replication cluster, `repmgr` needs to store
 information about the servers in the cluster in a dedicated database schema.
@@ -110,26 +107,27 @@ following objects:
 
 tables:
   - repl_events: events of interest
-  - repl_nodes: connection and status information for each server in the replication cluster
+  - repl_nodes: connection and status information for each server in the
+    replication cluster
   - repl_monitor: historical standby monitoring information written by `repmgrd`
 
 views:
-  - repl_show_nodes: based on the `repl_nodes` showing name of the server's upstream node
-  - repl_status: when `repmgrd`'s monitoring is enabled, shows current monitoring status for each node
-
+  - repl_show_nodes: based on the `repl_nodes` showing name of the server's
+    upstream node
+  - repl_status: when `repmgrd`'s monitoring is enabled, shows current monitoring
+    status for each node
 
 The `repmgr` metadata schema can be stored in an existing database or in its own
 dedicated database.
 
 
 Installation
-============
+------------
 
-System requirements
--------------------
+### System requirements
 
 `repmgr` is developed and tested on Linux and OS X, but should work on any
-UNIX-like system supported by PostgreSQL.
+UNIX-like system supported by PostgreSQL itself.
 
 `repmgr` supports PostgreSQL from version 9.3.
 
@@ -142,8 +140,10 @@ A dedicated system user for `repmgr` is *not* required; as many `repmgr` and
 `repmgrd` actions require direct access to the PostgreSQL data directory,
 it is usually executed by the `postgres` user.
 
-Packages
---------
+Additionally, we recommend installing `rsync` and enabling passwordless
+`ssh` connectivity between all servers in the replication cluster.
+
+### Packages
 
 We recommend installing `repmgr` using the available packages for your
 system.
@@ -162,8 +162,7 @@ See `PACKAGES.md` for details on building .deb and .rpm packages
 from the `repmgr` source code.
 
 
-Source installation
--------------------
+### Source installation
 
 `repmgr` source code can be obtained directly from the project GitHub repository:
 
@@ -179,15 +178,10 @@ infrastructure, e.g.:
 
     sudo make USE_PGXS=1 install
 
+`repmgr` can be built in any environment suitable for building PostgreSQL itself.
 
 
-Setting up a replication cluster with repmgr
-============================================
-
-
-
-Configuration
--------------
+### Configuration
 
 `repmgr` and `repmgrd` use a common configuration file, usually called `repmgr.conf`
 (although any name can be used if explicitly specified). At the very least,
@@ -210,3 +204,46 @@ Certain items in the configuration file can be overridden with command line opti
 
 - `-L/--log-level`
 - `-b/--pg_bindir`
+
+
+Setting up a replication cluster with repmgr
+--------------------------------------------
+
+The following section will describe how to set up a basic replication cluster
+using the `repmgr` command line tool. It is assumed PostgreSQL is installed
+on all servers in the cluster, `rsync` is available and password-less SSH
+connections are possible between all servers.
+
+    TIP: for testing `repmgr`, it's possible to use multiple PostgreSQL
+    instances running on different ports on the same computer, with
+    password-less SSH access to `localhost` enabled.
+
+### PostgreSQL configuration
+
+The primary server needs to be configured for replication with settings
+like the following in `postgresql.conf`:
+
+    # Allow read-only queries on standby servers. The number of WAL
+    # senders should be larger than the number of standby servers.
+
+    hot_standby = on
+    wal_level = 'hot_standby'
+    max_wal_senders = 10
+
+    # How much WAL to retain on the primary to allow a temporarily
+    # disconnected standby to catch up again. The larger this is, the
+    # longer the standby can be disconnected. This is needed only in
+    # 9.3; from 9.4, replication slots can be used instead (see below).
+
+    wal_keep_segments = 5000
+
+    # Enable archiving, but leave it unconfigured (so that it can be
+    # configured without a restart later). Recommended, not required.
+
+    archive_mode = on
+    archive_command = 'cd .'
+
+    # If you plan to use repmgrd, ensure that shared_preload_libraries
+    # is configured to load 'repmgr_funcs'
+
+    shared_preload_libraries = 'repmgr_funcs'
