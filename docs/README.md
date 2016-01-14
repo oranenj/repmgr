@@ -107,7 +107,7 @@ a `repmgr`-controlled cluster (`repmgr primary register`) and contains the
 following objects:
 
 tables:
-  - repl_events: events of interest
+  - repl_events: records events of interest
   - repl_nodes: connection and status information for each server in the
     replication cluster
   - repl_monitor: historical standby monitoring information written by `repmgrd`
@@ -186,9 +186,10 @@ infrastructure, e.g.:
 
 ### Configuration
 
-`repmgr` and `repmgrd` use a common configuration file, usually called `repmgr.conf`
-(although any name can be used if explicitly specified). At the very least,
-`repmgr.conf` must contain connection parameters for the local database.
+`repmgr` and `repmgrd` use a common configuration file, usually called
+`repmgr.conf` (although any name can be used if explicitly specified).
+At the very least, `repmgr.conf` must contain the connection parameters
+for the local `repmgr` database.
 
 The configuration file will be looked for in the following locations:
 
@@ -203,7 +204,8 @@ default locations.
 
 For a full list of annotated configuration items, see the file `repmgr.conf.sample`.
 
-Certain items in the configuration file can be overridden with command line options:
+These parameters in the configuration file can be overridden with command line
+options:
 
 - `-L/--log-level`
 - `-b/--pg_bindir`
@@ -240,12 +242,6 @@ The following replication settings must be included in `postgresql.conf`:
     # 9.3; from 9.4, replication slots can be used instead (see below).
 
     wal_keep_segments = 5000
-
-    # Enable archiving, but leave it unconfigured (so that it can be
-    # configured without a restart later). Recommended, not required.
-
-    archive_mode = on
-    archive_command = 'cd .'
 
 Create a dedicated PostgreSQL superuser account and a database for
 the `rempgr` metadata, e.g.
@@ -340,7 +336,7 @@ start the standby PostgreSQL server.
 
 Connect to the primary server and execute:
 
-    repmgr=# SELECT * FROM pg_stat_replication ;
+    repmgr=# SELECT * FROM pg_stat_replication;
     -[ RECORD 1 ]----+------------------------------
     pid              | 7704
     usesysid         | 16384
@@ -360,8 +356,53 @@ Connect to the primary server and execute:
     sync_state       | async
 
 
+(repmgr metadata)
+
+Using replication slots with repmgr
+-----------------------------------
+
+Promoting a standby server with repmgr
+--------------------------------------
+
+
+Setting up cascading replication with repmgr
+--------------------------------------------
+
+
+Performing a switchover with repmgr
+-----------------------------------
+
+
+Removing a standby from a replication cluster
+---------------------------------------------
+
+
+Automatic failover with repmgrd
+-------------------------------
+
+
+Using a witness server with repmgrd
+------------------------------------
+
+
+Generating event notifications with repmgr/repmgrd
+--------------------------------------------------
+
+
+Upgrading repmgr
+----------------
+
+`repmgr` is updated regularly with point releases (e.g. 3.0.2 to 3.0.3)
+containing bugfixes and other minor improvements. Any substantial new
+functionality will be included in a feature release (e.g. 3.0.x to 3.1.x).
+In general `repmgr` can be upgraded without any further action required,
+however feature releases may require the `repmgr` database to be upgraded.
+An SQL script will be provided - please check the release notes for details.
+
 Reference
 ---------
+
+### repmgr commands
 
 ### Error codes
 
