@@ -19,7 +19,8 @@ The `repmgr` suite provides two main tools:
     - switching over primary and standby servers
     - displaying the status of servers in the replication cluster
 
-- `repmgrd` is a daemon which actively monitors servers in a replication cluster:
+- `repmgrd` is a daemon which actively monitors servers in a replication cluster
+   and does the following:
     - monitoring and recording replication performance
     - performing failover by detecting failure of the primary and
       promoting the most suitable standby server
@@ -39,40 +40,35 @@ see 2ndQuadrant's pglogical extension.
 
 ### Concepts
 
-- replication cluster
+This guide assumes that you are familiar with PostgreSQL administration and
+streaming replication concepts. For further details on streaming
+replication, see this link:
+
+  http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-REPLICATION
+
+The following terms are used throughout the `repmgr` documentation.
+
+- `replication cluster`
 
 In the `repmgr` documentation, "replication cluster" refers to the network
 of PostgreSQL servers connected by streaming replication.
 
-- primary server
+- `node`
 
-The primary server (sometimes called "master server") is the only server in the
-replication cluster in read/write mode. Changes made to the primary server
-are propagated to connected standby servers.
+A `node` is a server within a network cluster.
 
-- standby server
+- `upstream node`
 
-All other servers in the replication cluster are standby servers (sometimes
-called "slaves" or "replicas") in read-only mode. By default, replication
-to standby servers is asynchronous, meaning standby servers will generally
-be slightly behind changes to the primary server. It's also possible to
-define one standby server as a synchronous standby which is always
-in the same state as the primary server, though this can mean commits
-on the primary server are delayed until confirmed on the synchronous standby.
+This is the node a standby server is connected to; either the primary server or in
+the case of cascading replication, another standby.
 
-- cascading replication
-
-Standby servers can connect to another standby server instead of the primary,
-enabling changes on the primary to be cascaded down through a hierarchy of
-standby servers.
-
-- failover
+- `failover`
 
 If a primary server fails, generally it's desirable to promote a suitable
 standby as the new primary. The `repmgrd` daemon supports automatic failover
 in this kind of case.
 
-- switchover
+- `switchover`
 
 In certain circumstances, such as hardware or operating system maintenance,
 it's necessary to take a primary server offline; in this case a controlled
@@ -107,15 +103,15 @@ a `repmgr`-controlled cluster (`repmgr primary register`) and contains the
 following objects:
 
 tables:
-  - repl_events: records events of interest
-  - repl_nodes: connection and status information for each server in the
+  - `repl_events`: records events of interest
+  - `repl_nodes`: connection and status information for each server in the
     replication cluster
-  - repl_monitor: historical standby monitoring information written by `repmgrd`
+  - `repl_monitor`: historical standby monitoring information written by `repmgrd`
 
 views:
-  - repl_show_nodes: based on the `repl_nodes` showing name of the server's
+  - `repl_show_nodes`: based on the `repl_nodes` showing name of the server's
     upstream node
-  - repl_status: when `repmgrd`'s monitoring is enabled, shows current monitoring
+  - `repl_status`: when `repmgrd`'s monitoring is enabled, shows current monitoring
     status for each node
 
 The `repmgr` metadata schema can be stored in an existing database or in its own
@@ -137,7 +133,7 @@ UNIX-like system supported by PostgreSQL itself.
 All servers in the replication cluster must be running the same major version of
 PostgreSQL, and we recommend that they also run the same minor version.
 
-`repmgr` must be installed on each server in the replication cluster.
+The `repmgr` tools must be installed on each server in the replication cluster.
 
 A dedicated system user for `repmgr` is *not* required; as many `repmgr` and
 `repmgrd` actions require direct access to the PostgreSQL data directory,
@@ -186,7 +182,7 @@ infrastructure, e.g.:
 
 ### Configuration
 
-`repmgr` and `repmgrd` use a common configuration file, usually called
+`repmgr` and `repmgrd` use a common configuration file, usually named
 `repmgr.conf` (although any name can be used if explicitly specified).
 At the very least, `repmgr.conf` must contain the connection parameters
 for the local `repmgr` database.
@@ -220,7 +216,7 @@ It is assumed PostgreSQL is installed on both servers in the cluster,
 `rsync` is available and password-less SSH connections are possible between
 both servers.
 
-    TIP: for testing `repmgr`, it's possible to use multiple PostgreSQL
+    *TIP*: for testing `repmgr`, it's possible to use multiple PostgreSQL
     instances running on different ports on the same computer, with
     password-less SSH access to `localhost` enabled.
 
@@ -358,15 +354,25 @@ Connect to the primary server and execute:
 
 (repmgr metadata)
 
+
+
+
 Using replication slots with repmgr
 -----------------------------------
 
-Promoting a standby server with repmgr
---------------------------------------
+http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-REPLICATION-SLOTS
 
 
 Setting up cascading replication with repmgr
 --------------------------------------------
+
+
+
+Promoting a standby server with repmgr
+--------------------------------------
+
+If a primary server fails or needs to be removed from the replication cluster,
+a standby needs to be promoted to become the new primary server.
 
 
 Performing a switchover with repmgr
@@ -463,6 +469,5 @@ Thanks from the repmgr core team.
 Further reading
 ---------------
 
-* http://blog.2ndquadrant.com/announcing-repmgr-2-0/
 * http://blog.2ndquadrant.com/managing-useful-clusters-repmgr/
 * http://blog.2ndquadrant.com/easier_postgresql_90_clusters/
