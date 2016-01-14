@@ -269,7 +269,7 @@ directory.
 
 ### repmgr configuration file
 
-Create a `repmgr.conf` file on both servers. The file must contain at
+Create a `repmgr.conf` file on the primary server. The file must contain at
 least the following parameters:
 
     cluster=test
@@ -307,13 +307,22 @@ be registered with `repmgr`, which creates the `repmgr` database:
     $ repmgr -f repmgr.conf primary register
     [2016-01-07 16:56:46] [NOTICE] master node correctly registered for cluster test with id 1 (conninfo: host=repmgr_node1 user=repmgr dbname=repmgr)
 
+(repmgr metadata)
+
 ### Clone the standby server
 
-The next step, cloning the standby from the primary server, is where `repmgr`
-starts to unfold its true potential, by combining a number of otherwise manual
-steps into one command, `repmgr standby clone`.
+Create a `repmgr.conf` file on the standby server. It must contain at
+least the same parameters as the primary's `repmgr.conf`, but with
+the values `node`, `node_name` and `conninfo` adjusted accordingly, e.g.:
 
-    $ repmgr -h repmgr_node1 -U repmgr -d repmgr -D /path/to/node2/data/ standby clone
+    cluster=test
+    node=2
+    node_name=node2
+    conninfo='host=repmgr_node2 user=repmgr dbname=repmgr'
+
+Clone the standby with:
+
+    $ repmgr -h repmgr_node1 -U repmgr -d repmgr -D /path/to/node2/data/ -f /path/to/node2/repmgr.conf standby clone
     [2016-01-07 17:21:26] [NOTICE] destination directory '/path/to/node2/data/' provided
     [2016-01-07 17:21:26] [NOTICE] starting backup...
     [2016-01-07 17:21:26] [HINT] this may take some time; consider using the -c/--fast-checkpoint option
@@ -322,11 +331,13 @@ steps into one command, `repmgr standby clone`.
     [2016-01-07 17:21:28] [NOTICE] you can now start your PostgreSQL server
     [2016-01-07 17:21:28] [HINT] for example : pg_ctl -D /path/to/node2/data/ start
 
-This will clone the PostgreSQL data directory files from the primary, including
-`postgresql.conf` and `pg_hba.conf` files, and additionally automatically create
-the `recovery.conf` file containing the correct parameters to start streaming
-from the primary server. Make any adjustments to the configuration files now, then
-start the standby PostgreSQL server.
+This will clone the PostgreSQL data directory files from the primary using
+PostgreSQL's pg_basebackup utility. A `recovery.conf` file containing the
+correct parameters to start streaming from the primary server will
+be created automatically, and unless otherwise the `postgresql.conf` and `pg_hba.conf`
+files will be copied.
+
+Make any adjustments to the configuration files now, then start the standby server.
 
 ### Verify replication is functioning
 
@@ -337,7 +348,7 @@ Connect to the primary server and execute:
     pid              | 7704
     usesysid         | 16384
     usename          | repmgr
-    application_name | walreceiver
+    application_name | node2
     client_addr      | 192.168.1.2
     client_hostname  |
     client_port      | 46196
@@ -351,9 +362,53 @@ Connect to the primary server and execute:
     sync_priority    | 0
     sync_state       | async
 
+*NOTE*: `repmgr standby clone` does not require `repmgr.conf`, however we
+recommend providing this as `repmgr` will set the `application_name` parameter
+in `recovery.conf` as value provided in `node_name`, making it easier to identify
+the node in `pg_stat_replication`. It's also possible to provide some advanced
+options for controlling the standby cloning process; see next section for
+details.
 
 (repmgr metadata)
 
+
+Advanced options for cloning a standby
+--------------------------------------
+
+### pg_basebackup options when cloning a standby
+
+By default, `pg_basebackup` performs a checkpoint before beginning the
+backup process. However, a normal checkpoint may take some time to complete;
+a fast checkpoint can be forced with `repmgr`'s  `-c/--fast-checkpoint`
+option. This may impact performance of the server being cloned from
+so should be used with care.
+
+Further options can be passed to the `pg_basebackup` utility via
+the `pg_basebackup_options` in `repmgr.conf`. See the PostgreSQL
+documentation for more details:
+  http://www.postgresql.org/docs/current/static/app-pgbasebackup.html
+
+### Using rsync to clone a standby
+
+By default `repmgr` uses the `pg_basebackup` utility to clone a standby's
+data directory from the primary. Under some circumstances it may be
+desirable to use `rsync` to do this, such as when resyncing the data
+directory of a failed server with an active replication node.
+
+To use `rsync` instead of `pg_basebackup`, provide the `-r/--rsync-only`
+option when executing `repmgr standby clone`.
+
+Note that `repmgr` forces `rsync` to use `--checksum` mode to ensure
+that all the required files are copied. This results in additional I/O
+on both source and destination server as the contents of files existing
+on both servers need to be compared, meaning this method is not necessarily
+faster than making a fresh clone with `pg_basebackup`.
+
+
+### Dealing with configuration files
+
+
+`--ignore-external-config-files`
 
 
 
@@ -365,6 +420,7 @@ http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-R
 
 Setting up cascading replication with repmgr
 --------------------------------------------
+
 
 
 
@@ -401,7 +457,8 @@ Upgrading repmgr
 `repmgr` is updated regularly with point releases (e.g. 3.0.2 to 3.0.3)
 containing bugfixes and other minor improvements. Any substantial new
 functionality will be included in a feature release (e.g. 3.0.x to 3.1.x).
-In general `repmgr` can be upgraded without any further action required,
+
+In general `repmgr` can be upgraded as-is without any further action required,
 however feature releases may require the `repmgr` database to be upgraded.
 An SQL script will be provided - please check the release notes for details.
 
