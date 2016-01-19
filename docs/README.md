@@ -466,7 +466,40 @@ which enables any valid `rsync` options to be passed to that command, e.g.:
 Using replication slots with repmgr
 -----------------------------------
 
-http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-REPLICATION-SLOTS
+Replication slots were introduced with PostgreSQL 9.4 and are designed to ensure
+that any standby connected to the primary using replication slot will always
+be able to retrieve the required WAL files. This removes the need to manually
+manage WAL file retention by estimating the number of WAL files that need to
+be maintained on the primary using `wal_keep_segments`. Do however be aware
+that if a standby is disconnected, WAL will continue to accumulate on the primary
+until either the standby reconnects or the replication slot is dropped.
+
+To enable `repmgr` to use replication slots, set the boolean parameter
+`use_replication_slots` in `repmgr.conf`:
+
+    use_replication_slots=1
+
+When cloning a standby, `repmgr` will automatically generate an appropriate
+slot name, which is stored in the `repl_nodes` table, and create the slot
+on the primary.
+
+Note that `repmgr` will fail with an error if this option is specified when
+working with PostgreSQL 9.3.
+
+Be aware that when initially cloning a standby, you will need to ensure
+that all required WAL files remain available while the cloning is taking
+place. If using the default `pg_basebackup` method, we recommend setting
+`pg_basebackup`'s `--xlog-method` parameter to `stream` like this:
+
+    pg_basebackup_options='--xlog-method=stream'
+
+See the `pg_basebackup` documentationfor details:
+    http://www.postgresql.org/docs/current/static/app-pgbasebackup.html
+
+Otherwise you'll need to set `wal_keep_segments` to an appropriately high value.
+
+Further information on replication slots in the PostgreSQL documentation"
+    http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-REPLICATION-SLOTS
 
 
 Setting up cascading replication with repmgr
