@@ -630,8 +630,35 @@ master; `repmgr standby follow` must now be executed to rectify this situation.
 Following a new master server with repmgr
 -----------------------------------------
 
-`repmgr standby follow` can also be used to detach a standby from its current
-upstream server and follow another upstream server.
+Following the failure or removal of the replication cluster's existing master
+server, `repmgr standby follow` can be used to make 'orphaned' standbys
+follow the new master.
+
+To demonstrate this, assuming a replication cluster in the same state as the
+end of the preceding section ("Promoting a standby server with repmgr"),
+execute this:
+
+    $ repmgr -f /path/to/node_3/repmgr.conf-D /path/to/node_3/data/ -h repmgr_node2 -U repmgr -d repmgr standby follow
+    [2016-01-19 16:57:06] [NOTICE] restarting server using '/usr/bin/postgres/pg_ctl -D /path/to/node_3/data/ -w -m fast restart'
+    waiting for server to shut down.... done
+    server stopped
+    waiting for server to start.... done
+    server started
+
+The standby is now replicating from the new master and `repl_nodes` has been
+updated to reflect this:
+
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | f
+      2 | master  |                  | test    | node2 | host=repmgr_node2 dbname=repmgr user=repmgr |           |      100 | t
+      3 | standby |                2 | test    | node3 | host=repmgr_node3 dbname=repmgr user=repmgr |           |      100 | t
+    (3 rows)
+
+
+Note that  `repmgr standby follow` can akso be used to detach a standby from its
+current upstream server and follow another upstream server, including the
+master.
 
 
 Performing a switchover with repmgr
@@ -759,7 +786,7 @@ which contains connection details for the local database.
 * `standby unregister`
 
     Unregisters a standby with `repmgr`. This command does not affect the actual
-    replication.
+    replication, just removes the standby's entry from the `repl_nodes` table.
 
 * `standby clone [node to be cloned]`
 
