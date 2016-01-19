@@ -507,7 +507,7 @@ for the existing standby) and register it:
     [2016-01-19 13:44:52] [HINT] for example : pg_ctl -D /path/to/node_3/data start
 
     $ repmgr -f node_3/repmgr.conf standby register
-    [2016-01-19 14:04:32] [NOTICE] standby node correctly registered for cluster test with id 3 (conninfo: host=repmgr_node3 dbname=repmgr user=repmgr port=5503)
+    [2016-01-19 14:04:32] [NOTICE] standby node correctly registered for cluster test with id 3 (conninfo: host=repmgr_node3 dbname=repmgr user=repmgr)
 
 After starting the standby, the `repl_nodes` table will look like this:
 
@@ -608,6 +608,131 @@ Reference
 
 ### repmgr commands
 
+The `repmgr` command line tool accepts commands for specific servers in the
+replication in the format "`server type` `action`", or for the entire
+replication cluster in the format "`cluster` `action`". Each command is
+described below.
+
+In general, each command needs to be provided with the path to `repmgr.conf`,
+which contains connection details for the local database.
+
+
+* `master register`
+
+    Registers a master in a cluster. This command needs to be executed before any
+    standby nodes are registered.
+
+    `primary register` can be used as an alias for `master register`.
+
+* `standby register`
+
+    Registers a standby with `repmgr`. This command needs to be executed to enable
+    promote/follow operations and to allow `repmgrd` to work with the node.
+    An existing standby can be registered using this command.
+
+* `standby unregister`
+
+    Unregisters a standby with `repmgr`. This command does not affect the actual
+    replication.
+
+* `standby clone [node to be cloned]`
+
+    Clones a new standby node from the data directory of the master (or
+    an upstream cascading standby) using `pg_basebackup` or `rsync`.
+    Additionally it will create the `recovery.conf` file required to
+    start the server as a standby. This command does not require
+    `repmgr.conf` to be provided, but does require connection details
+    of the master or upstream server as command line parameters.
+
+    Provide the `-D/--data-dir` option to specify the destination data
+    directory; if not, the same directory path as on the source server
+    will be used. By default, `pg_basebackup` will be used to copy data
+    from the master or upstream node but this can only be used for
+    bootstrapping new installations. To update an existing but 'stale'
+    data directory (for example belonging to a failed master), `rsync`
+    must be used by specifying `--rsync-only`. In this case,
+    password-less SSH connections between servers are required.
+
+* `standby promote`
+
+    Promotes a standby to a master if the current master has failed. This
+    command requires a valid `repmgr.conf` file for the standby, either
+    specified explicitly  with `-f/--config-file` or located in the current
+    working directory; no additional arguments are required.
+
+    If the standby promotion succeeds, the server will not need to be
+    restarted. However any other standbys will need to follow the new server,
+    by using `standby follow` (see below); if `repmgrd` is active, it will
+    handle this.
+
+    This command will not function if the current master is still running.
+
+* `standby switchover`
+
+    Promotes a standby to master and demotes the existing master to a standby.
+    This command must be run on the standby to be promoted, and requires a
+    password-less SSH connection to the current primary. Additionally the
+    location of the primary's `repmgr.conf` file must be provided with
+    `-C/--remote-config-file`.
+
+    `repmgrd` should not be active if a switchover is attempted. This
+    restriction may be lifted in a later version.
+
+* `standby follow`
+
+    Attaches the standby to a new master. This command requires a valid
+    `repmgr.conf` file for the standby, either specified explicitly with
+    `-f/--config-file` or located in the current working directory; no
+    additional arguments are required.
+
+    This command will force a restart of the standby server. It can only be used
+    to attach a standby to a new master node.
+
+* `witness create`
+
+    Creates a witness server as a separate PostgreSQL instance. This instance
+    can be on a separate server or a server running an existing node. The
+    witness server contain a copy of the repmgr metadata tables but will not
+    be set up as a standby; instead it will update its metadata copy each
+    time a failover occurs.
+
+    Note that it only makes sense to create a witness server if `repmgrd`
+    is in use; see section "witness server" above.
+
+    By default the witness server will use port 5499 to facilitate easier setup
+    on a server running an existing node.
+
+* `cluster show`
+
+    Displays information about each active node in the replication cluster. This
+    command polls each registered server and shows its role (master / standby /
+    witness) or "FAILED" if the node doesn't respond. It polls each server
+    directly and can be run on any node in the cluster; this is also useful
+    when analyzing connectivity from a particular node.
+
+    This command requires a valid `repmgr.conf` file to be provided; no
+    additional arguments are required.
+
+    Example:
+
+        $ repmgr -f /path/to/repmgr.conf cluster show
+
+        Role      | Name  | Upstream | Connection String
+        ----------+-------|----------|--------------------------------------------
+        * master  | node1 |          | host=repmgr_node1 dbname=repmgr user=repmgr
+          standby | node2 | node1    | host=repmgr_node1 dbname=repmgr user=repmgr
+          standby | node3 | node2    | host=repmgr_node1 dbname=repmgr user=repmgr
+
+* `cluster cleanup`
+
+    Purges monitoring history from the `repl_monitor` table to prevent excessive
+    table growth. Use the `-k/--keep-history` to specify the number of days of
+    monitoring history to retain. This command can be used manually or as a
+    cronjob.
+
+    This command requires a valid `repmgr.conf` file for the node on which it is
+    executed, either specified explicitly with `-f/--config-file` or located in
+    the current working directory; no additional arguments are required.
 
 
 ### Error codes
