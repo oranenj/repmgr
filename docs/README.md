@@ -20,7 +20,7 @@ The `repmgr` suite provides two main tools:
     - displaying the status of servers in the replication cluster
 
 - `repmgrd` is a daemon which actively monitors servers in a replication cluster
-   and does the following:
+   and performs the following tasks:
     - monitoring and recording replication performance
     - performing failover by detecting failure of the primary and
       promoting the most suitable standby server
@@ -222,14 +222,16 @@ both servers.
 
 ### PostgreSQL configuration
 
-On the primary server, a PostgreSQL instance must be initialised and operational.
+On the primary server, a PostgreSQL instance must be initialised and running.
 The following replication settings must be included in `postgresql.conf`:
 
-    # Allow read-only queries on standby servers. The number of WAL
-    # senders should be larger than the number of standby servers.
+    # Ensure WAL files contain enough information to enable read-only queries
+    # on the standby
 
-    hot_standby = on
     wal_level = 'hot_standby'
+
+    # Enable up to 10 replication connections
+
     max_wal_senders = 10
 
     # How much WAL to retain on the primary to allow a temporarily
@@ -238,6 +240,13 @@ The following replication settings must be included in `postgresql.conf`:
     # 9.3; from 9.4, replication slots can be used instead (see below).
 
     wal_keep_segments = 5000
+
+    # Enable read-only queries on a standby
+    # (Note: this will be ignored on a primary but we recommend including
+    # it anyway)
+
+    hot_standby = on
+
 
 Create a dedicated PostgreSQL superuser account and a database for
 the `rempgr` metadata, e.g.
@@ -302,12 +311,22 @@ to include this schema name, e.g.
 ### Initialise the primary server
 
 To enable `repmgr` to support a replication cluster, the primary node must
-be registered with `repmgr`, which creates the `repmgr` database:
+be registered with `repmgr`, which creates the `repmgr` database and adds
+a metadata record for the server:
 
     $ repmgr -f repmgr.conf primary register
     [2016-01-07 16:56:46] [NOTICE] master node correctly registered for cluster test with id 1 (conninfo: host=repmgr_node1 user=repmgr dbname=repmgr)
 
-(repmgr metadata)
+The metadata record looks like this:
+
+    repmgr=# SELECT * FROM repmgr_test.repl_nodes;
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
+    (1 row)
+
+Each server in the replication cluster will have its own record and will be updated
+when its status or role changes.
 
 ### Clone the standby server
 
@@ -339,6 +358,13 @@ files will be copied.
 
 Make any adjustments to the configuration files now, then start the standby server.
 
+*NOTE*: `repmgr standby clone` does not require `repmgr.conf`, however we
+recommend providing this as `repmgr` will set the `application_name` parameter
+in `recovery.conf` as value provided in `node_name`, making it easier to identify
+the node in `pg_stat_replication`. It's also possible to provide some advanced
+options for controlling the standby cloning process; see next section for
+details.
+
 ### Verify replication is functioning
 
 Connect to the primary server and execute:
@@ -362,18 +388,35 @@ Connect to the primary server and execute:
     sync_priority    | 0
     sync_state       | async
 
-*NOTE*: `repmgr standby clone` does not require `repmgr.conf`, however we
-recommend providing this as `repmgr` will set the `application_name` parameter
-in `recovery.conf` as value provided in `node_name`, making it easier to identify
-the node in `pg_stat_replication`. It's also possible to provide some advanced
-options for controlling the standby cloning process; see next section for
-details.
 
-(repmgr metadata)
+### Register the standby
+
+Register the standby server with:
+
+    repmgr -f /path/to/node_2/repmgr.conf standby register
+    [2016-01-19 11:13:16] [NOTICE] standby node correctly registered for cluster test with id 2 (conninfo: host=repmgr_node2 user=repmgr dbname=repmgr)
+
+Connect to the standby servers' `repmgr` database and check the `repl_nodes`
+table:
+
+    repmgr=# SELECT * FROM repmgr_test.repl_nodes;
+
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
+      2 | standby |                1 | test    | node2 | host=repmgr_node2 dbname=repmgr user=repmgr |           |      100 | t
+    (2 rows)
+
+The standby server now has a copy of records for all servers in the replication
+cluster.
 
 
 Advanced options for cloning a standby
 --------------------------------------
+
+The above section demonstrates the simplest possible way to clone
+a standby server. Depending on your situation, finer-grained control
+over the cloning process may be necessary.
 
 ### pg_basebackup options when cloning a standby
 
@@ -398,18 +441,26 @@ directory of a failed server with an active replication node.
 To use `rsync` instead of `pg_basebackup`, provide the `-r/--rsync-only`
 option when executing `repmgr standby clone`.
 
-Note that `repmgr` forces `rsync` to use `--checksum` mode to ensure
-that all the required files are copied. This results in additional I/O
-on both source and destination server as the contents of files existing
-on both servers need to be compared, meaning this method is not necessarily
-faster than making a fresh clone with `pg_basebackup`.
+Note that `repmgr` forces `rsync` to use `--checksum` mode to ensure that all
+the required files are copied. This results in additional I/O on both source
+and destination server as the contents of files existing on both servers need
+to be compared, meaning this method is not necessarily faster than making a
+fresh clone with `pg_basebackup`.
 
 
 ### Dealing with configuration files
 
+By default, `repmgr` will attempt to copy the standard configuration files
+(`postgresql.conf`, `pg_hba.conf` and `pg_ident.conf`) even if they are located
+outside of the data directory (though note currently they will be copied
+into the standby's data directory). To prevent this happening, when executing
+`repmgr standby clone` provide the `--ignore-external-config-files` option.
 
-`--ignore-external-config-files`
+If using `rsync` to clone a standby, additional control over which files
+not to transfer is possible by configuring `rsync_options` in `repmgr.conf`,
+which enables any valid `rsync` options to be passed to that command, e.g.:
 
+    rsync_options='--exclude=postgresql.local.conf'
 
 
 Using replication slots with repmgr
