@@ -590,7 +590,21 @@ Using a witness server with repmgrd
 Generating event notifications with repmgr/repmgrd
 --------------------------------------------------
 
--> add list of events
+Following event notifications can be generated:
+
+  * master_register
+  * standby_register
+  * standby_unregister
+  * standby_clone
+  * standby_promote
+  * standby_follow
+  * standby_switchover
+  * witness_create
+  * witness_create
+  * repmgrd_start
+  * repmgrd_shutdown
+  * repmgrd_failover_promote
+  * repmgrd_failover_follow
 
 Upgrading repmgr
 ----------------
