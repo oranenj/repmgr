@@ -249,7 +249,7 @@ The following replication settings must be included in `postgresql.conf`:
 
 
 Create a dedicated PostgreSQL superuser account and a database for
-the `rempgr` metadata, e.g.
+the `repmgr` metadata, e.g.
 
     createuser -s repmgr
     createdb repmgr -O repmgr
@@ -671,7 +671,7 @@ and registered:
      node_id |      event       | successful |        event_timestamp        |                                       details
     ---------+------------------+------------+-------------------------------+-------------------------------------------------------------------------------------
            1 | master_register  | t          | 2016-01-19 15:04:39.781733+09 |
-           2 | standby_clone    | t          | 2016-01-19 15:04:49.530001+09 | Cloned from host 'rempgr_node1', port 5432; backup method: pg_basebackup; --force: N
+           2 | standby_clone    | t          | 2016-01-19 15:04:49.530001+09 | Cloned from host 'repmgr_node1', port 5432; backup method: pg_basebackup; --force: N
            2 | standby_register | t          | 2016-01-19 15:04:50.621292+09 |
     (3 rows)
 
