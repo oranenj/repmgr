@@ -147,7 +147,7 @@ Additionally, we recommend installing `rsync` and enabling passwordless
 We recommend installing `repmgr` using the available packages for your
 system.
 
-- RedHat/CentOS: RPM packages for `repmgr` are available via Yum throug
+- RedHat/CentOS: RPM packages for `repmgr` are available via Yum through
   the PostgreSQL Global Development Group RPM repository ( http://yum.postgresql.org/ ).
   You need to follow the instructions for your distribution (RedHat, CentOS,
   Fedora, etc.) and architecture as detailed at yum.postgresql.org.
@@ -157,8 +157,8 @@ system.
   Instructions can be found in the APT section of the PostgreSQL Wiki
   ( https://wiki.postgresql.org/wiki/Apt ).
 
-See `PACKAGES.md` for details on building .deb and .rpm packages
-from the `repmgr` source code.
+See `PACKAGES.md` for details on building .deb and .rpm packages from the
+`repmgr` source code.
 
 
 ### Source installation
@@ -408,7 +408,11 @@ table:
     (2 rows)
 
 The standby server now has a copy of records for all servers in the replication
-cluster.
+cluster. Note that the relationship between primary and standby is explicitly
+defined via the `upstream_node_id` value, which shows here that the standby's
+upstream server is the replication cluster primary. While of limited use
+in a simple 2-level primary/standby replication cluster, this information is
+required to effectively manage cascading replication (see below).
 
 
 Advanced options for cloning a standby
@@ -463,6 +467,59 @@ which enables any valid `rsync` options to be passed to that command, e.g.:
     rsync_options='--exclude=postgresql.local.conf'
 
 
+Setting up cascading replication with repmgr
+--------------------------------------------
+
+Cascading replication, introduced with PostgreSQL 9.2, enables a standby server
+to replicate from another standby server rather than directly from the primary,
+meaning replication changes "cascade" down through a hierarchy of servers. This
+can be used to reduce load on the master and minimize bandwith usage between
+sites.
+
+`repmgr` supports cascading replication. When cloning a standby, in `repmgr.conf`
+set the parameter `upstream_node_id` to the id of the server the standby
+should connect to, and `repmgr` will perform the clone using this server
+and create `recovery.conf` to point to it. Note that if `upstream_node_id`
+is not explicitly provided, `repmgr` will use the primary as the server
+to clone from.
+
+To demonstrate cascading replication, ensure you have a primary and standby
+set up as shown above in the section "Setting up a simple replication cluster
+with repmgr". Create an additional standby server with `repmgr.conf` looking
+like this:
+
+    cluster=test
+    node=3
+    node_name=node3
+    conninfo='host=repmgr_node3 user=repmgr dbname=repmgr'
+    upstream_node_id=2
+
+Ensure `upstream_node_id` contains the `node` id of the previously
+created standby. Clone this standby (using the connection parameters
+for the existing standby) and register it:
+
+    $ repmgr -h repmgr_node2 -U repmgr -d repmgr -D /path/to/node3/data/ -f /path/to/node3/repmgr.conf standby clone
+    [2016-01-19 13:44:52] [NOTICE] destination directory 'node_3/data/' provided
+    [2016-01-19 13:44:52] [NOTICE] starting backup (using pg_basebackup)...
+    [2016-01-19 13:44:52] [HINT] this may take some time; consider using the -c/--fast-checkpoint option
+    [2016-01-19 13:44:52] [NOTICE] standby clone (using pg_basebackup) complete
+    [2016-01-19 13:44:52] [NOTICE] you can now start your PostgreSQL server
+    [2016-01-19 13:44:52] [HINT] for example : pg_ctl -D /path/to/node_3/data start
+
+    $ repmgr -f node_3/repmgr.conf standby register
+    [2016-01-19 14:04:32] [NOTICE] standby node correctly registered for cluster test with id 3 (conninfo: host=repmgr_node3 dbname=repmgr user=repmgr port=5503)
+
+After starting the standby, the `repl_nodes` table will look like this:
+
+    repmgr=# SELECT * from repmgr_test.repl_nodes;
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
+      2 | standby |                1 | test    | node2 | host=repmgr_node2 dbname=repmgr user=repmgr |           |      100 | t
+      3 | standby |                2 | test    | node3 | host=repmgr_node3 dbname=repmgr user=repmgr |           |      100 | t
+    (3 rows)
+
+
 Using replication slots with repmgr
 -----------------------------------
 
@@ -496,17 +553,13 @@ place. If using the default `pg_basebackup` method, we recommend setting
 See the `pg_basebackup` documentationfor details:
     http://www.postgresql.org/docs/current/static/app-pgbasebackup.html
 
-Otherwise you'll need to set `wal_keep_segments` to an appropriately high value.
+Otherwise it's necessary to set `wal_keep_segments` to an appropriately high
+value.
 
 Further information on replication slots in the PostgreSQL documentation"
     http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-REPLICATION-SLOTS
 
-
-Setting up cascading replication with repmgr
---------------------------------------------
-
-
-
+(example)
 
 Promoting a standby server with repmgr
 --------------------------------------
@@ -527,6 +580,9 @@ Automatic failover with repmgrd
 -------------------------------
 
 
+What happens with cascading standby?
+
+
 Using a witness server with repmgrd
 ------------------------------------
 
@@ -534,6 +590,7 @@ Using a witness server with repmgrd
 Generating event notifications with repmgr/repmgrd
 --------------------------------------------------
 
+-> add list of events
 
 Upgrading repmgr
 ----------------
@@ -550,6 +607,8 @@ Reference
 ---------
 
 ### repmgr commands
+
+
 
 ### Error codes
 
