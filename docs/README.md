@@ -399,7 +399,7 @@ Register the standby server with:
 Connect to the standby servers' `repmgr` database and check the `repl_nodes`
 table:
 
-    repmgr=# SELECT * FROM repmgr_test.repl_nodes;
+    repmgr=# SELECT * FROM repmgr_test.repl_nodes ORDER BY id;
 
      id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
     ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
@@ -477,9 +477,9 @@ can be used to reduce load on the master and minimize bandwith usage between
 sites.
 
 `repmgr` supports cascading replication. When cloning a standby, in `repmgr.conf`
-set the parameter `upstream_node_id` to the id of the server the standby
+set the parameter `upstream_node` to the id of the server the standby
 should connect to, and `repmgr` will perform the clone using this server
-and create `recovery.conf` to point to it. Note that if `upstream_node_id`
+and create `recovery.conf` to point to it. Note that if `upstream_node`
 is not explicitly provided, `repmgr` will use the primary as the server
 to clone from.
 
@@ -492,9 +492,9 @@ like this:
     node=3
     node_name=node3
     conninfo='host=repmgr_node3 user=repmgr dbname=repmgr'
-    upstream_node_id=2
+    upstream_node=2
 
-Ensure `upstream_node_id` contains the `node` id of the previously
+Ensure `upstream_node` contains the `node` id of the previously
 created standby. Clone this standby (using the connection parameters
 for the existing standby) and register it:
 
@@ -511,7 +511,7 @@ for the existing standby) and register it:
 
 After starting the standby, the `repl_nodes` table will look like this:
 
-    repmgr=# SELECT * from repmgr_test.repl_nodes;
+    repmgr=# SELECT * FROM repmgr_test.repl_nodes ORDER BY id;
      id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
     ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
       1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
@@ -550,7 +550,7 @@ place. If using the default `pg_basebackup` method, we recommend setting
 
     pg_basebackup_options='--xlog-method=stream'
 
-See the `pg_basebackup` documentationfor details:
+See the `pg_basebackup` documentation for details:
     http://www.postgresql.org/docs/current/static/app-pgbasebackup.html
 
 Otherwise it's necessary to set `wal_keep_segments` to an appropriately high
@@ -565,7 +565,73 @@ Promoting a standby server with repmgr
 --------------------------------------
 
 If a primary server fails or needs to be removed from the replication cluster,
-a standby needs to be promoted to become the new primary server.
+a new primary server must be designated to ensure the cluster continues
+working correctly. This can be done with `repmgr standby promote`, which promotes
+the standby on the current server to master
+
+To demonstrate this, set up a replication cluster with a master and two attached
+standby servers so that the `repl_nodes` table looks like this:
+
+    repmgr=# SELECT * FROM repmgr_test.repl_nodes ORDER BY id;
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
+      2 | standby |                1 | test    | node2 | host=repmgr_node2 dbname=repmgr user=repmgr |           |      100 | t
+      3 | standby |                1 | test    | node3 | host=repmgr_node3 dbname=repmgr user=repmgr |           |      100 | t
+    (3 rows)
+
+Stop the current master with e.g.:
+
+    $ pg_ctl -D /path/to/node_1/data -m fast stop
+
+At this point the replication cluster will be in a partially disabled state with
+both standbys accepting read-only connections while attempting to connect to the
+stopped master. Note that the `repl_nodes` table will not yet have been updated
+and will still show the master as active.
+
+Promote the first standby with:
+
+    $ repmgr -f /path/to/node_2/repmgr.conf standby promote
+
+This will produce output similar to the following:
+
+    [2016-01-19 16:07:31] [ERROR] connection to database failed: could not connect to server: Connection refused
+            Is the server running on host "repmgr_node1" (192.161.2.1) and accepting
+            TCP/IP connections on port 5432?
+    could not connect to server: Connection refused
+            Is the server running on host "repmgr_node1" (192.161.2.1) and accepting
+            TCP/IP connections on port 5432?
+
+    [2016-01-19 16:07:31] [NOTICE] promoting standby
+    [2016-01-19 16:07:31] [NOTICE] promoting server using '/usr/bin/postgres/pg_ctl -D /path/to/node_2/data promote'
+    server promoting
+    [2016-01-19 16:07:33] [NOTICE] STANDBY PROMOTE successful
+
+Note: the first `[ERROR]` is `repmgr` attempting to connect to the current
+master to verify that it has failed. If a valid master is found, `repmgr`
+will refuse to promote a standby.
+
+The `repl_nodes` table will now look like this:
+
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | f
+      2 | master  |                  | test    | node2 | host=repmgr_node2 dbname=repmgr user=repmgr |           |      100 | t
+      3 | standby |                1 | test    | node3 | host=repmgr_node3 dbname=repmgr user=repmgr |           |      100 | t
+    (3 rows)
+
+The previous master has been marked as inactive, and `node2`'s `upstream_node_id`
+has been cleared as it's now the "topmost" server in the replication cluster.
+
+However the sole remaining standby is still trying to replicate from the failed
+master; `repmgr standby follow` must now be executed to rectify this situation.
+
+
+Following a new master server with repmgr
+-----------------------------------------
+
+`repmgr standby follow` can also be used to detach a standby from its current
+upstream server and follow another upstream server.
 
 
 Performing a switchover with repmgr
