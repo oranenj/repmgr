@@ -341,7 +341,7 @@ the values `node`, `node_name` and `conninfo` adjusted accordingly, e.g.:
 
 Clone the standby with:
 
-    $ repmgr -h repmgr_node1 -U repmgr -d repmgr -D /path/to/node2/data/ -f /path/to/node2/repmgr.conf standby clone
+    $ repmgr -h repmgr_node1 -U repmgr -d repmgr -D /path/to/node2/data/ -f /etc/repmgr.conf standby clone
     [2016-01-07 17:21:26] [NOTICE] destination directory '/path/to/node2/data/' provided
     [2016-01-07 17:21:26] [NOTICE] starting backup...
     [2016-01-07 17:21:26] [HINT] this may take some time; consider using the -c/--fast-checkpoint option
@@ -393,7 +393,7 @@ Connect to the primary server and execute:
 
 Register the standby server with:
 
-    repmgr -f /path/to/node_2/repmgr.conf standby register
+    repmgr -f /etc/repmgr.conf standby register
     [2016-01-19 11:13:16] [NOTICE] standby node correctly registered for cluster test with id 2 (conninfo: host=repmgr_node2 user=repmgr dbname=repmgr)
 
 Connect to the standby servers' `repmgr` database and check the `repl_nodes`
@@ -498,7 +498,7 @@ Ensure `upstream_node` contains the `node` id of the previously
 created standby. Clone this standby (using the connection parameters
 for the existing standby) and register it:
 
-    $ repmgr -h repmgr_node2 -U repmgr -d repmgr -D /path/to/node3/data/ -f /path/to/node3/repmgr.conf standby clone
+    $ repmgr -h repmgr_node2 -U repmgr -d repmgr -D /path/to/node3/data/ -f /etc/repmgr.conf standby clone
     [2016-01-19 13:44:52] [NOTICE] destination directory 'node_3/data/' provided
     [2016-01-19 13:44:52] [NOTICE] starting backup (using pg_basebackup)...
     [2016-01-19 13:44:52] [HINT] this may take some time; consider using the -c/--fast-checkpoint option
@@ -591,7 +591,7 @@ and will still show the master as active.
 
 Promote the first standby with:
 
-    $ repmgr -f /path/to/node_2/repmgr.conf standby promote
+    $ repmgr -f /etc/repmgr.conf standby promote
 
 This will produce output similar to the following:
 
@@ -638,7 +638,7 @@ To demonstrate this, assuming a replication cluster in the same state as the
 end of the preceding section ("Promoting a standby server with repmgr"),
 execute this:
 
-    $ repmgr -f /path/to/node_3/repmgr.conf-D /path/to/node_3/data/ -h repmgr_node2 -U repmgr -d repmgr standby follow
+    $ repmgr -f /etc/repmgr.conf -D /path/to/node_3/data/ -h repmgr_node2 -U repmgr -d repmgr standby follow
     [2016-01-19 16:57:06] [NOTICE] restarting server using '/usr/bin/postgres/pg_ctl -D /path/to/node_3/data/ -w -m fast restart'
     waiting for server to shut down.... done
     server stopped
@@ -664,6 +664,79 @@ master.
 Performing a switchover with repmgr
 -----------------------------------
 
+A typical use-case for replication is a combination of master and standby
+server, with the standby serving as a backup which can easily be activated
+in case of a problem with the master. Such an unplanned failover would
+normally be handled by promoting the standby, after which appropriate action
+taken to restore the old master.
+
+In some cases however it's desirable to promote the standby in a planned
+way, e.g. so maintenance can be performed on the master; this kind of switchover
+is supported by the `repmgr standby switchover` command.
+
+`repmgr standby switchover` differs from other `repmgr` actions in that it
+also performs actions on another server, for which reason both passwordless
+SSH access and the path of `repmgr.conf` on that server.
+
+    *NOTE* `repmgr standby switchover` performs a relatively complex series
+    of operations on two servers, and should therefore be performed after
+    careful preparation and with adequate attention. In particular you should
+    be confident that your network environment is stable and reliable.
+
+    We recommend running `repmgr standby switchover`  at the most verbose
+    logging level (`--log-level DEBUG --verbose`) and capturing all output
+    to assist troubleshooting any problems.
+
+To demonstrate switchover, we will assume a replication cluster in the same
+state as at the end of the preceding section ("Following a new master server with
+repmgr"); the objective here is to promote `node3` as master
+and have `node2` follow it. Execute:
+
+   repmgr -f /etc/repmgr.conf -C /etc/repmgr.conf -v standby switchover
+
+
+### Caveats
+
+The functionality provided `repmgr standby switchover` is primarily aimed
+at a two-server master/standby replication cluster and currently does
+not support additional standbys.
+
+- `repmgrd` should not be running when a switchover is carried out, otherwise
+  the `repmgrd` may try and promote a standby by itself.
+- Any other standbys attached to the old master will need to be manually
+  instructed to point to the new master (e.g. with `repmgr standby follow`).
+
+We hope to remove these restrictions in future versions of `repmgr`.
+
+
+### Switchover and PostgreSQL 9.3/9.4
+
+In order to efficiently reintegrate a demoted master into the replication
+cluster as a standby, it's necessary to resynchronise its data directory
+with that of the current master, as it's very likely that their timelines
+will have diverged slightly following the shutdown of the old master.
+
+The utility `pg_rewind` provides an efficient way of doing this, however
+is not included in the core PostgreSQL distribution for versions 9.3 and 9.4.
+Hoever, `pg_rewind` is available separately for these versions and we
+strongly recommend its installation. To use it with versions 9.3 and 9.4,
+provide the command line option `--pg_rewind`, optionally with the
+path to the `pg_rewind` binary location if not installed in the PostgreSQL
+`bin` directory.
+
+`pg_rewind` for versions 9.3 and 9.4 can be obtained from:
+  https://github.com/vmware/pg_rewind
+
+If `pg_rewind` is not available, as a fallback `repmgr` will use `repmgr
+standby clone` to resynchronise the old master's data directory using
+`rsync`. However, in order to ensure all files are synchronised, the
+entire data directory on both servers must be scanned, a process which
+can take some time on larger databases.
+
+
+
+Reintegrating a failed server into a replication cluster
+--------------------------------------------------------
 
 Removing a standby from a replication cluster
 ---------------------------------------------
@@ -743,7 +816,7 @@ The following event types are available:
 
 Note that under some circumstances (e.g. no replication cluster master could
 be located), it will not be possible to write an entry into the `repl_events`
-table, in which case `event_notification_command` can server as a fallback.
+table, in which case `event_notification_command` can serve as a fallback.
 
 Upgrading repmgr
 ----------------
@@ -758,6 +831,10 @@ An SQL script will be provided - please check the release notes for details.
 
 Reference
 ---------
+
+### Default values for database connections
+
+
 
 ### repmgr commands
 
@@ -868,7 +945,7 @@ which contains connection details for the local database.
 
     Example:
 
-        $ repmgr -f /path/to/repmgr.conf cluster show
+        $ repmgr -f /etc/repmgr.conf cluster show
 
         Role      | Name  | Upstream | Connection String
         ----------+-------|----------|--------------------------------------------
