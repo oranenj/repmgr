@@ -832,9 +832,22 @@ An SQL script will be provided - please check the release notes for details.
 Reference
 ---------
 
-### Default values for database connections
+### Default values
 
+For some command line and most configuration file parameters, `repmgr` falls
+back to default values if values for these are not explicitly provided.
 
+The file `repmgr.conf.sample` documents the default value of configuration
+parameters if one is set. Of particular note is the log level, which
+defaults to NOTICE; particularly when using repmgr from the command line
+it may be useful to set this to a higher level with `-L/--log-level`. e.g.
+to `INFO`.
+
+Execute `repmgr --help` to see the default values for various command
+line parameters, particularly database connection parameters.
+
+See the section `Configuration` above for information on how the
+configuration file is located if `-f/--config-file` is not supplied.
 
 ### repmgr commands
 
