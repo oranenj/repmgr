@@ -790,9 +790,10 @@ entire data directory on both servers must be scanned, a process which
 can take some time on larger databases.
 
 
-
 Reintegrating a failed server into a replication cluster
 --------------------------------------------------------
+
+
 
 Removing a standby from a replication cluster
 ---------------------------------------------
@@ -801,12 +802,113 @@ Removing a standby from a replication cluster
 Automatic failover with repmgrd
 -------------------------------
 
+`repmgrd` is a management and monitoring daemon which runs on standby nodes
+and which can automate actions such as failover and updating standbys to
+follow the new master. `repmgrd` can be started simply with e.g.:
 
-What happens with cascading standby?
+    repmgrd -f /etc/repmgr.conf --verbose > $HOME/repmgr/repmgr.log 2>&1
+
+or alternatively:
+
+    repmgrd -f /etc/repmgr.conf --verbose --monitoring-history > $HOME/repmgr/repmgrd.log 2>&1
+
+which will track replication advance or lag on all registered standbys.
+
+For permanent operation, we recommend using the options `-d/--daemonize` to
+detach the `repmgrd` process, and `-p/--pid-file` to write the process PID
+to a file.
+
+Example log output (at default log level):
+
+    [2015-03-11 13:15:40] [INFO] checking cluster configuration with schema 'repmgr_test'
+    [2015-03-11 13:15:40] [INFO] checking node 2 in cluster 'test'
+    [2015-03-11 13:15:40] [INFO] reloading configuration file and updating repmgr tables
+    [2015-03-11 13:15:40] [INFO] starting continuous standby node monitoring
+
+Note that currently `repmgrd` does not provide logfile rotation. To ensure
+the current logfile does not grow indefinitely, configure your system's `logrotate`
+to do this. Sample configuration to rotate logfiles weekly with retention
+for up to 52 weeks and rotation forced if a file grows beyond 100Mb:
+
+    /var/log/postgresql/repmgr-9.4.log {
+        missingok
+        compress
+        rotate 52
+        maxsize 100M
+        weekly
+        create 0600 postgres postgres
+    }
+
+Monitoring
+----------
+
+When `repmgrd` is running with the option `-m/--monitoring-history`, it will
+constantly write node status information to the `repl_monitor` table, which can
+be queried easily using the view `repl_status`:
+
+    repmgr=# SELECT * FROM repmgr_test.repl_status;
+    -[ RECORD 1 ]-------------+-----------------------------
+    primary_node              | 1
+    standby_node              | 2
+    standby_name              | node2
+    node_type                 | standby
+    active                    | t
+    last_monitor_time         | 2015-03-11 14:02:34.51713+09
+    last_wal_primary_location | 0/3012AF0
+    last_wal_standby_location | 0/3012AF0
+    replication_lag           | 0 bytes
+    replication_time_lag      | 00:00:03.463085
+    apply_lag                 | 0 bytes
+    communication_time_lag    | 00:00:00.955385
+
+The interval in which monitoring history is written is controlled by the
+configuration parameter `monitor_interval_secs`; default is 2.
+
+As this can generate a large amount of monitoring data in the `repl_monitor`
+table , it's advisable to regularly purge historical data with
+`repmgr cluster cleanup`; use the `-k/--keep-history` to specify how
+many day's worth of data should be retained.
 
 
 Using a witness server with repmgrd
 ------------------------------------
+
+In a situation caused e.g. by a network interruption between two
+data centres, it's important to avoid a "split-brain" situation where
+both sides of the network assume they are the active segment and the
+side without an active master unilaterally promotes one of its standbys.
+
+To prevent this situation happening, it's essential to ensure that one
+network segment has a "voting majority", so other segments will know
+they're in the minority and not attempt to promote a new master. Where
+an odd number of servers exists, this is not an issue. However, if each
+network has an even number of nodes, it's necessary to provide some way
+of ensuring a majority, which is where the witness server becomes useful.
+
+This is not a fully-fledged standby node and is not integrated into
+replication, but it effectively represents the "casting vote" when
+deciding which network segment has a majority. A witness server can
+be set up using `repmgr witness create` (see below for details) and
+can run on a dedicated server or an existing node. Note that it only
+makes sense to create a witness server in conjunction with running
+`repmgrd`; the witness server will require its own `repmgrd` instance.
+
+
+
+repmgrd and cascading replication
+---------------------------------
+
+Cascading replication - where a standby can connect to an upstream node and not
+the master server itself - was introduced in PostgreSQL 9.2. `repmgr` and
+`repmgrd` support cascading replication by keeping track of the relationship
+between standby servers - each node record is stored with the node id of its
+upstream ("parent") server (except of course the master server).
+
+In a failover situation where the master node fails and a top-level standby
+is promoted, a standby connected to another standby will not be affected
+and continue working as normal (even if the upstream standby it's connected
+to becomes the master node). If however the node's direct upstream fails,
+the "cascaded standby" will attempt to reconnect to that node's parent.
 
 
 Generating event notifications with repmgr/repmgrd
