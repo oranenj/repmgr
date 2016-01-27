@@ -804,19 +804,33 @@ Automatic failover with repmgrd
 
 `repmgrd` is a management and monitoring daemon which runs on standby nodes
 and which can automate actions such as failover and updating standbys to
-follow the new master. `repmgrd` can be started simply with e.g.:
+follow the new master.
+
+To use `repmgrd` for automatic failover, the following `repmgrd` options must
+be set in `repmgr.conf`:
+
+    failover=automatic
+    promote_command='repmgr standby promote -f /etc/repmgr/repmgr.conf'
+    follow_command='repmgr standby follow -f /etc/repmgr/repmgr.conf'
+
+(See `repmgr.conf.sample` for further `repmgrd`-specific settings).
+
+When `failover` is set to `automatic`, upon detecting failure of the current
+master, `repmgrd` will execute one of `promote_command` or `follow_command`,
+depending on whether the current server is becoming the new master or
+needs to follow another server which has become the new master. Note that
+these commands can be any valid shell script which results in one of these
+actions happening, but we strongly recommend executing `repmgr` directly.
+
+`repmgrd` can be started simply with e.g.:
 
     repmgrd -f /etc/repmgr.conf --verbose > $HOME/repmgr/repmgr.log 2>&1
-
-or alternatively:
-
-    repmgrd -f /etc/repmgr.conf --verbose --monitoring-history > $HOME/repmgr/repmgrd.log 2>&1
-
-which will track replication advance or lag on all registered standbys.
 
 For permanent operation, we recommend using the options `-d/--daemonize` to
 detach the `repmgrd` process, and `-p/--pid-file` to write the process PID
 to a file.
+
+Note that currently `repmgrd` is not required to run on the master server.
 
 Example log output (at default log level):
 
@@ -825,12 +839,25 @@ Example log output (at default log level):
     [2015-03-11 13:15:40] [INFO] reloading configuration file and updating repmgr tables
     [2015-03-11 13:15:40] [INFO] starting continuous standby node monitoring
 
+To demonstrate automatic failover, set up a 3-node replication cluster (one master
+and two standbys streaming directly from the master) so that the `repl_nodes`
+table looks like this:
+
+XXX
+
+Start `repmgrd` on each standby and verify that it's running by examining
+the log output.
+
+
+repmgrd log rotation
+--------------------
+
 Note that currently `repmgrd` does not provide logfile rotation. To ensure
 the current logfile does not grow indefinitely, configure your system's `logrotate`
 to do this. Sample configuration to rotate logfiles weekly with retention
 for up to 52 weeks and rotation forced if a file grows beyond 100Mb:
 
-    /var/log/postgresql/repmgr-9.4.log {
+    /var/log/postgresql/repmgr-9.5.log {
         missingok
         compress
         rotate 52
