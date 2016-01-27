@@ -687,20 +687,76 @@ SSH access and the path of `repmgr.conf` on that server.
     logging level (`--log-level DEBUG --verbose`) and capturing all output
     to assist troubleshooting any problems.
 
-To demonstrate switchover, we will assume a replication cluster in the same
-state as at the end of the preceding section ("Following a new master server with
-repmgr"); the objective here is to promote `node3` as master
-and have `node2` follow it. Execute:
+    Please read carefully the list of caveats below.
 
-   repmgr -f /etc/repmgr.conf -C /etc/repmgr.conf -v standby switchover
+To demonstrate switchover, we will assume a replication cluster running on
+PostgreSQL 9.5 or later with a master (`node1`) and a standby (`node2`);
+after the switchover `node2` should become the master with `node1` following it.
+
+The switchover command must be run from the standby which is to be promoted,
+and in its simplest form looks like this:
+
+   repmgr -f /etc/repmgr.conf -C /etc/repmgr.conf standby switchover
+
+`-f /etc/repmgr.conf` is, as usual the local repmgr node's configuration file.
+`-C /etc/repmgr.conf` is the path to the configuration file on the current
+master, which is required to execute `repmgr` remotely on that server;
+if it is not provided with `-C`, `repmgr` will check the same path as on the
+local server, as well as the normal default locations. `repmgr` will check
+this file can be found before performing any further actions.
+
+    $ repmgr -f /etc/repmgr.conf -C /etc/repmgr.conf standby switchover -v
+    [2016-01-27 16:38:33] [NOTICE] using configuration file "/etc/repmgr.conf"
+    [2016-01-27 16:38:33] [NOTICE] switching current node 2 to master server and demoting current master to standby...
+    [2016-01-27 16:38:34] [NOTICE] 5 files copied to /tmp/repmgr-node1-archive
+    [2016-01-27 16:38:34] [NOTICE] connection to database failed: FATAL:  the database system is shutting down
+
+    [2016-01-27 16:38:34] [NOTICE] current master has been stopped
+    [2016-01-27 16:38:34] [ERROR] connection to database failed: FATAL:  the database system is shutting down
+
+    [2016-01-27 16:38:34] [NOTICE] promoting standby
+    [2016-01-27 16:38:34] [NOTICE] promoting server using '/usr/local/bin/pg_ctl -D /var/lib/postgresql/9.5/node_2/data promote'
+    server promoting
+    [2016-01-27 16:38:36] [NOTICE] STANDBY PROMOTE successful
+    [2016-01-27 16:38:36] [NOTICE] Executing pg_rewind on old master server
+    [2016-01-27 16:38:36] [NOTICE] 5 files copied to /var/lib/postgresql/9.5/data
+    [2016-01-27 16:38:36] [NOTICE] restarting server using '/usr/local/bin/pg_ctl -w -D /var/lib/postgresql/9.5/node_1/data -m fast restart'
+    pg_ctl: PID file "/var/lib/postgresql/9.5/node_1/data/postmaster.pid" does not exist
+    Is server running?
+    starting server anyway
+    [2016-01-27 16:38:37] [NOTICE] node 1 is replicating in state "streaming"
+    [2016-01-27 16:38:37] [NOTICE] switchover was successful
+
+Messages containing the line `connection to database failed: FATAL: the database
+system is shutting down` are not errors - `repmgr` is polling the old master database
+to make sure it has shut down correctly. `repmgr` will also archive any
+configuration files in the old master's data directory as they will otherwise
+be overwritten by `pg_rewind`; they are restored once the `pg_rewind` operation
+has completed.
+
+The old master is now replicating as a standby from the new master and `repl_nodes`
+should have been updated to reflect this:
+
+    repmgr=# SELECT * from repl_nodes ORDER BY id;
+     id |  type   | upstream_node_id | cluster | name  |                      conninfo                      | slot_name | priority | active
+    ----+---------+------------------+---------+-------+----------------------------------------------------+-----------+----------+--------
+      1 | standby |                2 | test    | node1 | host=localhost dbname=repmgr user=repmgr port=5601 |           |      100 | t
+      2 | master  |                  | test    | node2 | host=localhost dbname=repmgr user=repmgr port=5602 |           |      100 | t
+    (2 rows)
 
 
 ### Caveats
 
-The functionality provided `repmgr standby switchover` is primarily aimed
-at a two-server master/standby replication cluster and currently does
-not support additional standbys.
-
+- the functionality provided `repmgr standby switchover` is primarily aimed
+  at a two-server master/standby replication cluster and currently does
+  not support additional standbys.
+- `repmgr standby switchover` is designed to use the `pg_rewind` utility,
+  standard in 9.5 and later and available for seperately in 9.3 and 9.4
+  (see note below)
+- `pg_rewind` *requires* that either `wal_log_hits` is enabled, or that the
+   data checksums were enabled when the cluster was initialized. See the
+  `pg_rewind` documentation for details:
+     http://www.postgresql.org/docs/current/static/app-pgrewind.html
 - `repmgrd` should not be running when a switchover is carried out, otherwise
   the `repmgrd` may try and promote a standby by itself.
 - Any other standbys attached to the old master will need to be manually
