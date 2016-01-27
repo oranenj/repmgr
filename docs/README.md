@@ -76,7 +76,7 @@ switchover is necessary, whereby a suitable standby is promoted and the
 existing primary removed from the replication cluster in a controlled manner.
 The `repmgr` command line client provides this functionality.
 
-- witness server
+- `witness server`
 
 `repmgr` provides functionality to set up a so-called "witness server" to
 assist in determining a new primary server in a failover situation with more
@@ -400,7 +400,6 @@ Connect to the standby servers' `repmgr` database and check the `repl_nodes`
 table:
 
     repmgr=# SELECT * FROM repmgr_test.repl_nodes ORDER BY id;
-
      id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
     ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
       1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
@@ -556,7 +555,7 @@ See the `pg_basebackup` documentation for details:
 Otherwise it's necessary to set `wal_keep_segments` to an appropriately high
 value.
 
-Further information on replication slots in the PostgreSQL documentation"
+Further information on replication slots in the PostgreSQL documentation:
     http://www.postgresql.org/docs/current/interactive/warm-standby.html#STREAMING-REPLICATION-SLOTS
 
 (example)
@@ -738,10 +737,10 @@ The old master is now replicating as a standby from the new master and `repl_nod
 should have been updated to reflect this:
 
     repmgr=# SELECT * from repl_nodes ORDER BY id;
-     id |  type   | upstream_node_id | cluster | name  |                      conninfo                      | slot_name | priority | active
-    ----+---------+------------------+---------+-------+----------------------------------------------------+-----------+----------+--------
-      1 | standby |                2 | test    | node1 | host=localhost dbname=repmgr user=repmgr port=5601 |           |      100 | t
-      2 | master  |                  | test    | node2 | host=localhost dbname=repmgr user=repmgr port=5602 |           |      100 | t
+     id |  type   | upstream_node_id | cluster | name  |                 conninfo                 | slot_name | priority | active
+    ----+---------+------------------+---------+-------+------------------------------------------+-----------+----------+--------
+      1 | standby |                2 | test    | node1 | host=localhost dbname=repmgr user=repmgr |           |      100 | t
+      2 | master  |                  | test    | node2 | host=localhost dbname=repmgr user=repmgr |           |      100 | t
     (2 rows)
 
 
@@ -794,9 +793,9 @@ Reintegrating a failed server into a replication cluster
 --------------------------------------------------------
 
 
-
 Removing a standby from a replication cluster
 ---------------------------------------------
+
 
 
 Automatic failover with repmgrd
@@ -832,21 +831,89 @@ to a file.
 
 Note that currently `repmgrd` is not required to run on the master server.
 
-Example log output (at default log level):
+
+To demonstrate automatic failover, set up a 3-node replication cluster (one master
+and two standbys streaming directly from the master) so that the `repl_nodes`
+table looks like this:
+
+    repmgr=# SELECT * FROM repmgr_test.repl_nodes ORDER BY id;
+     id |  type   | upstream_node_id | cluster | name  |                  conninfo                   | slot_name | priority | active
+    ----+---------+------------------+---------+-------+---------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=repmgr_node1 dbname=repmgr user=repmgr |           |      100 | t
+      2 | standby |                1 | test    | node2 | host=repmgr_node2 dbname=repmgr user=repmgr |           |      100 | t
+      3 | standby |                1 | test    | node3 | host=repmgr_node3 dbname=repmgr user=repmgr |           |      100 | t
+    (3 rows)
+
+
+Start `repmgrd` on each standby and verify that it's running by examining
+the log output, which at default log level will look like this:
 
     [2015-03-11 13:15:40] [INFO] checking cluster configuration with schema 'repmgr_test'
     [2015-03-11 13:15:40] [INFO] checking node 2 in cluster 'test'
     [2015-03-11 13:15:40] [INFO] reloading configuration file and updating repmgr tables
     [2015-03-11 13:15:40] [INFO] starting continuous standby node monitoring
 
-To demonstrate automatic failover, set up a 3-node replication cluster (one master
-and two standbys streaming directly from the master) so that the `repl_nodes`
-table looks like this:
+Each `repmgrd` should also have noted its successful startup in the `repl_events`
+table:
 
-XXX
+    repmgr=# SELECT * FROM repl_events WHERE event = 'repmgrd_start';
+     node_id |     event     | successful |        event_timestamp        | details
+    ---------+---------------+------------+-------------------------------+---------
+           2 | repmgrd_start | t          | 2016-01-27 18:22:38.080231+09 |
+           3 | repmgrd_start | t          | 2016-01-27 18:22:38.08756+09  |
+    (2 rows)
 
-Start `repmgrd` on each standby and verify that it's running by examining
-the log output.
+Now stop the current master server with e.g.:
+
+    pg_ctl -D /path/to/node1/data -m immediate stop
+
+This will force the master node to shut down straight away, aborting all
+processes and transactions.  This will cause a flurry of activity in
+the `repmgrd` log files as each `repmgrd` detects the failure of the master
+and a failover decision is made. Here extracts from the standby server
+promoted to new master:
+
+    [2016-01-27 18:32:58] [WARNING] connection to upstream has been lost, trying to recover... 15 seconds before failover decision
+    [2016-01-27 18:33:03] [WARNING] connection to upstream has been lost, trying to recover... 10 seconds before failover decision
+    [2016-01-27 18:33:08] [WARNING] connection to upstream has been lost, trying to recover... 5 seconds before failover decision
+    ...
+    [2016-01-27 18:33:18] [NOTICE] this node is the best candidate to be the new master, promoting...
+    ...
+    [2016-01-27 18:33:20] [NOTICE] STANDBY PROMOTE successful
+
+and here from the standby server which is now following the new master:
+
+    [2016-01-27 18:32:58] [WARNING] connection to upstream has been lost, trying to recover... 15 seconds before failover decision
+    [2016-01-27 18:33:03] [WARNING] connection to upstream has been lost, trying to recover... 10 seconds before failover decision
+    [2016-01-27 18:33:08] [WARNING] connection to upstream has been lost, trying to recover... 5 seconds before failover decision
+    ...
+    [2016-01-27 18:33:23] [NOTICE] node 2 is the best candidate for new master, attempting to follow...
+    [2016-01-27 18:33:23] [INFO] changing standby's master
+    ...
+    [2016-01-27 18:33:25] [NOTICE] node 3 now following new upstream node 2
+
+The `repl_nodes` table should have been updated to reflect the new situation,
+with the original master (`node1`) marked as inactive, and standby `node3`
+now following the new master (`node2`):
+
+    repmgr=# SELECT * from repl_nodes ORDER BY id;
+     id |  type   | upstream_node_id | cluster | name  |                 conninfo                 | slot_name | priority | active
+    ----+---------+------------------+---------+-------+------------------------------------------+-----------+----------+--------
+      1 | master  |                  | test    | node1 | host=localhost dbname=repmgr user=repmgr |           |      100 | f
+      2 | master  |                  | test    | node2 | host=localhost dbname=repmgr user=repmgr |           |      100 | t
+      3 | standby |                2 | test    | node3 | host=localhost dbname=repmgr user=repmgr |           |      100 | t
+    (3 rows)
+
+The `repl_events` table will contain a summary of what happened to each server
+during the failover:
+
+    repmgr=# SELECT * from repmgr_test.repl_events where event_timestamp>='2016-01-27 18:30';
+     node_id |          event           | successful |        event_timestamp        |                         details
+    ---------+--------------------------+------------+-------------------------------+----------------------------------------------------------
+           2 | standby_promote          | t          | 2016-01-27 18:33:20.061736+09 | node 2 was successfully promoted to master
+           2 | repmgrd_failover_promote | t          | 2016-01-27 18:33:20.067132+09 | node 2 promoted to master; old master 1 marked as failed
+           3 | repmgrd_failover_follow  | t          | 2016-01-27 18:33:25.331012+09 | node 3 now following new upstream node 2
+    (3 rows)
 
 
 repmgrd log rotation
